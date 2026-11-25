@@ -53,7 +53,7 @@ plot1 <- ggplot(data = train_melt, mapping = aes(x= cell_type, y = value, color 
   geom_boxplot(outlier.shape = NA)+
   geom_jitter(position = position_jitterdodge(jitter.width = 0.5, dodge.width = 0.7,
                                               jitter.height = 0))+
-  labs(title = "Gene Expressions Disribution by Cell Types (Training Set)", x = "Cell type", y= "Gene Expression")+
+  labs(title = "Gene Expressions Disribution by Cell Types (Training Set)", x = "Cell type", y= "Log2 Normalized Gene Expression")+
   theme_minimal()
 print(plot1)
 ggsave(plot = plot1, "Results/Gene_Exp_boxplot_training.png")
@@ -66,7 +66,7 @@ Comparing machine learning models with a baseline is important to understand whe
 
 ```{r, results='hide'}
 
-baseline_predic_train <- rep(names(which.max(table(train$cell_type))), 95)
+baseline_predic_train <- rep(names(which.max(table(train$cell_type))), nrow(train))
 print(baseline_predic_train)
 
 ```
@@ -119,17 +119,27 @@ test_con_predic2 <- factor(test_con_predic2, levels = c("B", "T"))
 
 conf_matrix_tree1 <- confusionMatrix(test_con_predic1, test$cell_type)
 print(conf_matrix_tree1)
+
 conf_matrix_tree2 <- confusionMatrix(test_con_predic2, test$cell_type)
 print(conf_matrix_tree2)
 
-baseline_predic_test <- rep(names(which.max(table(train$cell_type))), 33)
+baseline_predic_test <- rep(names(which.max(table(train$cell_type))), nrow(test))
 baseline_predic_test <- factor(baseline_predic_test, levels = c("B", "T"))
 conf_matrix_baseline <- confusionMatrix(baseline_predic_test, test$cell_type)
 print(conf_matrix_baseline)
 
-evaluation_res <- data.frame(Model = c("Baseline", "Tree 1", "Tree 2"), Accuracy = c(0.7273, 1.00, 1.00), B_Recall=c(1.00, 1.00, 1.00), T_Recall =c(0.00, 1.00, 1.00)) 
-write.csv(evaluation_res, file = "Results/Evaluation_results.csv", row.names = FALSE)
+a <- conf_matrix_tree1$overall["Accuracy"]
+b <- conf_matrix_tree2$overall["Accuracy"]
+c <- conf_matrix_baseline$overall["Accuracy"]
+d <- conf_matrix_tree1$byClass["Sensitivity"]
+e <- conf_matrix_tree1$byClass["Specificity"]
+f <- conf_matrix_tree2$byClass["Sensitivity"]
+g <- conf_matrix_tree2$byClass["Specificity"]
+h <- conf_matrix_baseline$byClass["Sensitivity"]
+i <- conf_matrix_baseline$byClass["Specificity"]
 
+evaluation_res <- data.frame(Model = c("Baseline", "Tree 1", "Tree 2"), Accuracy = c(c,a ,b), B_Recall=c(h, d, f), T_Recall =c(i, e, g)) 
+write.csv(evaluation_res, file = "Results/Evaluation_results.csv", row.names = FALSE)
 
 plot_table <- subset(test, select = sample_id)
 plot_table <- plot_table %>% mutate(Actual_cell_type = test$cell_type, tree1_Probability_T=test_prediction1_T, tree1_prediction = test_con_predic1, tree2_Probability_T = test_prediction2_T, tree2_prediction = test_con_predic2, baseline_prediction = baseline_predic_test)

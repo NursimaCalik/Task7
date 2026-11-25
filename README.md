@@ -12,4 +12,12 @@ The dataset contains 128 patient samples and expression measurements of three ge
 The complete analysis, figures, and explanations are available in the R Markdown report and its HTML version.
 
 5. Reproducibility
-The project includes an renv.lock file to record package dependencies.
+The project includes an renv.lock file to record package dependencies. To reproduce the analysis:
+
+ -Download or clone this repository.
+ -Open the RStudio project file.
+ -Run renv::restore() in the R Console to install the required packages.
+ -Open task7-expression-prediction.Rmd in RStudio.
+ -Click Knit to generate the HTML report.
+
+The analysis also saves the results, tables, and figures in the Results folder.

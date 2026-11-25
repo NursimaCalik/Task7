@@ -1,0 +1,202 @@
+---
+title: "Task7"
+author: "Nursima Çalık"
+date: "2026-11-17"
+output: html_document
+---
+## 1. Introduction
+Acute lymphocytic leukemia (ALL) is a type of cancer of the blood and bone marrow that is the spongy tissue inside bones where blood cells are made. There are a lot of forms of ALL and this task focuses on B-ALL and T-ALL forms. B-ALL form is based on progenitor cells of B lymphocytes while T-ALL form originates from precursors of T lymphocytes. In this task, the data come from 128 different patients with acute lymphoblastic leukemia (ALL).Each sample is labelled as B-cell or T-cell leukemia. Also expression measurements of CD3D, CD79A and MS4A1 genes will be used for prediction. The aim of this task is to predict whether a sample belongs to the B-ALL or T-ALL subtype using decision trees and to compare their performance with a simple baseline method.[1,2]
+
+## 2. Understand and check the data
+The dataset contains 95 samples labelled as B-cell leukemia and 33 samples labelled as T-cell leukemia, with no missing values or duplicated sample IDs. Expression measurements of the CD3D, CD79A, and MS4A1 genes were used as features in this task. A feature is an input variable used by a model to make predictions. In contrast, the cell_type variablemwhich indicates whether a sample belongs to the B-cell or T-cell leukemia subtype was used as the label. A label is the outcome that the model tries to predict.
+Training samples are used to teach the model classification rules, while test samples are used to evaluate the model's performance. The sample ID and cell_type variables were not included among the input features because sample IDs only identify individual samples and do not provide biological measurements related to leukemia subtypes. Furthermore, cell_type is already the outcome that the model is trying to predict.
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(datasets)
+library(caret)
+library(rpart)
+library(rpart.plot)
+data <- read.csv("Data/expression_matrix.csv", header = TRUE)
+dim(data)
+str(data)
+all(!is.na(data))
+sum(duplicated(data$sample_id))
+table(data$cell_type)
+data$cell_type <- factor(data$cell_type, levels = c("B","T"))
+
+```
+
+## 3. Separate Training and Testing 
+In this step, the dataset was divided into training and test sets using stratified random sampling. This method was used to maintain similar proportions of B-cell and T-cell leukemia samples in both sets. First, the samples were grouped according to their cell types. Then, approximately 75% of the samples from each class ere randomly selected for the training set while the remaining samples was rounded down for each class. A random seed of 42 was used to make the sampling process reproducible. As a result, the training set contained 95 samples(71 B and 24 T-cell type) and the test set contained 33 samples(24 B and 9 T-cell type). It was also confirmed that no sample IDs were shared between the two sets. 
+After splitting the dataset, gene expression patterns were explored using only the training samples to keep the test samples separate from model development. A boxplot combined with jittered points was created to compare the expression levels of CD3D, CD79A, and MS4A1 between B-cell and T-cell leukemia samples. The results showed differences in gene expression levels between the two leukemia subtypes, especially for CD3D and CD79A. The difference was particularly clear for CD3D which showed higher expression levels in T-cell samples than in B-cell samples, with no visible overlap between the two groups. CD79A generally showed higher expression levels in B-cell samples, although some overlap was observed. In contrast, MS4A1 did not show such a clear separation between the two subtypes. Its expression levels showed a wider distribution in B-cell samples, with considerable overlap between the two groups. [3,4]
+
+```{r, message=FALSE}
+data$cell_type <- factor(data$cell_type, levels = c("B","T"))
+set.seed(42)
+train_index <- unlist(lapply(
+  split(seq_len(nrow(data)), data$cell_type),
+  function(i) sample(i, size = floor(0.75 * length(i)))
+))
+train <- data[train_index, ]
+test <- data[-train_index, ]
+table(train$cell_type)
+table(test$cell_type)
+sum(test$sample_id %in% train$sample_id)
+data <- data %>% mutate(assignment = ifelse(data$sample_id %in% train$sample_id, "Train", "Test"))
+write.csv(data, file = "Results/Sample_split.csv", row.names = FALSE)
+
+train_melt <- melt(train, id.vars = 'cell_type', measure.vars = c('CD3D', 'CD79A', 'MS4A1') )
+plot1 <- ggplot(data = train_melt, mapping = aes(x= cell_type, y = value, color = variable) )+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.5, dodge.width = 0.7,
+                                              jitter.height = 0))+
+  labs(title = "Gene Expressions Disribution by Cell Types (Training Set)", x = "Cell type", y= "Gene Expression")+
+  theme_minimal()
+print(plot1)
+ggsave(plot = plot1, "Results/Gene_Exp_boxplot_training.png")
+
+```
+
+## 4. Establish a baseline
+A baseline is a simple reference method used to compare the performance of machine learning models. In this section, the most common class in the training set was identified as B-cell leukemia. Therefore, the baseline predicted all samples as B-cell leukemia without considering gene expression measurements.
+Comparing machine learning models with a baseline is important to understand whether they provide better predictions than a simple reference method. In this dataset, the number of B-cell samples was higher than the number of T-cell samples, resulting in a class imbalance. Since the baseline always predicted the majority class, it could correctly classify B-cell samples but failed to identify T-cell samples. This shows that predicting only the most frequent class can lead to incorrect predictions for all samples belonging to the minority class. This also explains why accuracy can be misleading when the classes have different numbers of samples. For example, the baseline achieved 72.73% accuracy on the test set, but it could not correctly predict any T-cell samples. Therefore, a high accuracy does not always mean that a model performs well for both classes. By comparing the models with the baseline, we can see whether they improve the predictions. It is also important to consider B-cell recall and T-cell recall together with accuracy to better understand the model's performance.
+
+```{r, results='hide'}
+
+baseline_predic_train <- rep(names(which.max(table(train$cell_type))), 95)
+print(baseline_predic_train)
+
+```
+
+## 5. Train two small decision trees
+In this step, two decision tree models were trained to predict the leukemia subtype using gene expression measurements. A decision tree is a classification method that learns decision rules from training data by selecting genes and threshold values to separate different classes. The first model (Tree 1) was trained using only CD3D expression, with a maximum depth of 1. The second model (Tree 2) was allowed to use three genes (CD3D, CD79A, and MS4A1), with a maximum depth of 2. Both models were trained using the same training dataset and the specified control parameters. No additional parameter tuning or cross-validation was performed.
+After training, both decision trees showed the same structure and classification rule. They used CD3D expression with a threshold of approximately 7.66 to separate B-cell and T-cell samples. Samples with CD3D expression below this threshold were classified as B-cell leukemia, while samples with expression equal to or above the threshold were classified as T-cell leukemia. Although Tree 2 was allowed to use three genes and a greater maximum depth, it selected only CD3D. Because CD3D alone was able to separate the two classes completely in the training dataset, so additional branches were not needed. Then, the predicted probabilities for class T were obtained from both models. A probability threshold of 0.5 was used to determine the predicted class. Samples with a predicted T probability of at least 0.5 were classified as T-cell leukemia while the remaining samples were classified as B-cell leukemia. The predicted probabilities were calculated from the proportions of B-cell and T-cell samples in the final nodes of the trees. Although the models predicted probabilities of 0 or 1, these values did not mean that the models would always predict the correct leukemia subtype for new patients.
+
+```{r, results='hide'}
+tree1<- rpart(cell_type ~ CD3D, data = train, control = rpart.control(minsplit = 10, minbucket = 5, cp = 0, xval = 0, maxdepth = 1))
+plot2 <- rpart.plot(tree1, main = "Decision Tree for CD3D")
+print(plot2)
+png(filename = "Results/tree1_decision_tree.png")
+plot(plot2)
+dev.off()
+
+tree2 <- rpart(cell_type ~ CD3D + CD79A + MS4A1, data = train, control = rpart.control(minsplit = 10, minbucket = 5, cp = 0, xval = 0, maxdepth = 2))
+plot3 <- rpart.plot(tree2, main = "Decision Tree for CD3D, CD79A and MS4A1")
+print(plot3)
+png(filename = "Results/tree2_decision_tree.png")
+plot(plot3)
+dev.off()
+
+prediction1_T <- predict(tree1, type = "prob")
+prediction1_T <- prediction1_T[ ,c("T")]
+cond_predic1 <- ifelse(prediction1_T >= 0.5, "T", "B")
+
+prediction2_T <- predict(tree2, type = "prob")
+prediction2_T <- prediction2_T[ ,c("T")]
+cond_predic2 <- ifelse(prediction2_T >= 0.5, "T", "B")
+
+```
+
+## 6. Evaluate on held-out samples
+In this step, the baseline, Tree 1, and Tree 2 models were evaluated using the same test dataset that contains 33 samples. The models were evaluated without changing the selected genes, tree parameters, or probability threshold. Confusion matrices were created to compare the predicted classes with the actual classes. Three performance measures were used: accuracy, B-cell recall, and T-cell recall. Accuracy represents the proportion of correctly predicted samples among all test samples and recall shows the proportion of correctly identified samples within each class. 
+The baseline model achieved an accuracy of 72.73% (24/33). It correctly predicted all 24 B-cell samples and resulted in a B-cell recall of 100% (24/24). However, it failed to identify any of the 9 T-cell samples and resulted in a T-cell recall of 0% (0/9). In contrast, Tree 1 and Tree 2 achieved an accuracy of 100% (33/33). Both models correctly classified all 24 B-cell samples and all 9 T-cell samples and gave a recall of 100% for both classes. These results showed that decision trees performed better than the baseline especially in identifying T-cell leukemia samples.
+A scatter plot was also created to show Tree 2's predicted probabilities for class T in the test dataset. The samples were colored according to their actual cell types and a horizontal line at 0.5 was added to show the classification threshold. The predicted T probabilities were 0 for B-cell samples and 1 for T-cell samples. Therefore all test samples were correctly classified using the selected threshold. A prediction table that contains the sample IDs, actual classes, both trees' predicted probabilities and classes, and baseline predictions was also saved.
+Finally, training accuracy was calculated for both decision trees and compared with test accuracy. Tree 1 and Tree 2 achieved 100% training accuracy (95/95) and 100% test accuracy (33/33). Although both models correctly classified all samples in the training and test sets, high training accuracy alone does not guarantee that a model will perform equally well on new and unseen samples.
+
+```{r, message=FALSE}
+test_prediction1_T <- predict(tree1, newdata = test, type = "prob")
+test_prediction1_T <- test_prediction1_T[ ,c("T")]
+test_con_predic1 <- ifelse(test_prediction1_T >= 0.5, "T", "B")
+test_con_predic1 <- factor(test_con_predic1, levels = c("B", "T"))
+
+test_prediction2_T <- predict(tree2, newdata = test, type = "prob")
+test_prediction2_T <- test_prediction2_T[ ,c("T")]
+test_con_predic2 <- ifelse(test_prediction2_T >= 0.5, "T", "B")
+test_con_predic2 <- factor(test_con_predic2, levels = c("B", "T"))
+
+conf_matrix_tree1 <- confusionMatrix(test_con_predic1, test$cell_type)
+print(conf_matrix_tree1)
+conf_matrix_tree2 <- confusionMatrix(test_con_predic2, test$cell_type)
+print(conf_matrix_tree2)
+
+baseline_predic_test <- rep(names(which.max(table(train$cell_type))), 33)
+baseline_predic_test <- factor(baseline_predic_test, levels = c("B", "T"))
+conf_matrix_baseline <- confusionMatrix(baseline_predic_test, test$cell_type)
+print(conf_matrix_baseline)
+
+evaluation_res <- data.frame(Model = c("Baseline", "Tree 1", "Tree 2"), Accuracy = c(0.7273, 1.00, 1.00), B_Recall=c(1.00, 1.00, 1.00), T_Recall =c(0.00, 1.00, 1.00)) 
+write.csv(evaluation_res, file = "Results/Evaluation_results.csv", row.names = FALSE)
+
+
+plot_table <- subset(test, select = sample_id)
+plot_table <- plot_table %>% mutate(Actual_cell_type = test$cell_type, tree1_Probability_T=test_prediction1_T, tree1_prediction = test_con_predic1, tree2_Probability_T = test_prediction2_T, tree2_prediction = test_con_predic2, baseline_prediction = baseline_predic_test)
+plot4 <- ggplot(data = plot_table, mapping = aes(x=sample_id, y= tree2_Probability_T))+
+  geom_point(aes(color = Actual_cell_type))+
+  geom_hline(yintercept = 0.5)+
+  labs(title = "Tree 2: Predicted T-Cell Probabilities(Test Set)", x= "Sample ID", y= "Predicted Probability of Class T ")+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90))
+print(plot4)
+ggsave(plot = plot4, filename = "Results/tree2_test_probability_plot.png")
+
+write.csv(plot_table, file = "Results/Prediction Table.csv", row.names = FALSE)
+
+
+cond_predic1 <- factor(cond_predic1, levels = c("B", "T"))
+cond_predic2 <- factor(cond_predic2, levels = c("B", "T"))
+train_accur_tree1 <- confusionMatrix(cond_predic1, train$cell_type)
+train_accur_tree2 <- confusionMatrix(cond_predic2, train$cell_type)
+print(train_accur_tree1)
+print(train_accur_tree2)
+
+```
+
+## 7. Interpret the result
+According to the results, both Tree 1 and Tree 2 performed better than the baseline. The accuracy of both decision trees was 100% while the baseline achieved 72.73%. The main improvement was observed in the T-cell class because the baseline failed to correctly identify any T-cell samples and resulted in 0% T-cell recall. In contrast, both decision trees correctly classified all T-cell samples and achieved 100% T-cell recall. However, B-cell recall remained 100% for all three methods.
+
+Adding more genes did not change the structure or predictions of the decision trees. Although tree 2 was allowed to use all genes , it selected only CD3D like tree 1. This was because CD3D showed a clear difference between B-cell and T-cell samples and was able to separate the two classes completely in the training dataset. The other 2 genes also showed some difference between classes but their expression values overlapped more. Therefore, using additional genes did not improve the predictions because CD3D alone was sufficient to separate the training samples.
+
+Since the test dataset contained only 33 samples, a single incorrect prediction could have a noticeable effect on the results. If one sample was incorrectly classified, accuracy would decrease from 100% to 96.97% with a difference of approximately 3.03%  points. Similarly, if one of the 9 T-cell samples was incorrectly classified, T-cell recall would decrease from 100% to 88.89% with a difference of approximately 11.11% points. These results show that a single error can have a greater effect on accuracy and recall when the nember of samples is small.
+
+Although both decision trees correctly classified all 33 test samples, this does not mean that they will always make correct predictions for new patients. The test dataset contained only 33 samples so the results may not show how well the models will perform on larger or different patient groups. More independent samples are needed to better evaluate the models' performance. Additional genes can also be studied but using more genes does not always improve the results. Therefore, the models showed good performance on this test dataset, but their performance on new patients is still uncertain.
+
+Gene expression measurements may be different between laboratories, platforms, or patient groups. These differences can be caused by different laboratory conditions, measurement methods, or biological differences between patients. As a result, the CD3D threshold learned from the training data may not work equally well on samples from other laboratories or patient groups. Therefore, the models should also be tested on independent datasets to evaluate their performance under different conditions.
+
+Predicting leukemia subtypes using gene expression does not mean that the selected gene causes leukemia. In this task, CD3D was used to separate B-cell and T-cell leukemia samples because its expression levels were different between the 2 groups. However, this difference may be related to the biological characteristics of the cell types rather than the cause of the disease. Therefore, CD3D can be useful for predicting leukemia subtypes but additional studies are needed to determinate whether it has a role in causing luekemia.
+
+Using test labels to select genes or change model settings would make the evaluation misleading. The test dataset should only be used to evaluate the models after training. If the actual classes of test samples were used to improve the models , the test results could appear better than the models' real performance on new patients. Therefore, genes and model settings should be selected without using test labels.
+
+## 8. Limitations
+In this task, one of the limitations is related to data normalization. The gene expression data from all 128 samples were already normalized together before the training and test sets were created. Therefore, the models were evaluated using processed data and the complete process has not been independently tested on new patients. In addition, the dataset did not contain batch information so it could not be confirmed that batch effects were absent. These limitations should be considered when the models' performance is evaluated. 
+
+## 9. Resources
+
+[1] https://www.mayoclinic.org/diseases-conditions/acute-lymphocytic-leukemia/symptoms-causes/syc-20369077  
+
+[2] https://www.gpoh.de/kinderkrebsinfo/content/diseases/leukaemias/pohpatinfoall120060414/pohpatinfoallkurz/index_eng.html 
+
+[3] https://www.geeksforgeeks.org/r-language/create-boxplot-of-multiple-column-values-using-ggplot2-in-r/ 
+
+[4] https://www.youtube.com/watch?v=_nk-zQglcMU 
+
+[5] https://www.geeksforgeeks.org/r-language/replicate-elements-of-vector-in-r-programming-rep-method/ 
+
+[6] https://www.geeksforgeeks.org/r-language/regression-tree-with-simulated-data-rpart-package/ 
+
+[7] https://www.r-bloggers.com/2023/09/plotting-decision-trees-in-r-with-rpart-and-rpart-plot/#google_vignette 
+
+[8] https://www.geeksforgeeks.org/r-machine-learning/predict-function-in-r/
+
+[9] https://stackoverflow.com/questions/7144118/how-can-i-save-a-plot-as-an-image-on-the-disk 
+
+## 10. Session Information
+```{r, message=FALSE, warning=FALSE, results='hide'}
+sessionInfo()
+```
+
+
+
+

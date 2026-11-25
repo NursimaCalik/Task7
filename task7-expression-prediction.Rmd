@@ -193,7 +193,7 @@ In this task, one of the limitations is related to data normalization. The gene 
 [9] https://stackoverflow.com/questions/7144118/how-can-i-save-a-plot-as-an-image-on-the-disk 
 
 ## 10. Session Information
-```{r, message=FALSE, warning=FALSE, results='hide'}
+```{r, message=FALSE, warning=FALSE}
 sessionInfo()
 ```
 
